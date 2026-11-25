@@ -1,0 +1,40 @@
+name: Build Windows idevicerestore
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git base-devel mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-curl mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-libzip autoconf automake
+            libtool pkg-config
+      - name: Build dependencies and idevicerestore
+        run: |
+          pacman -S --noconfirm --needed $(pacman -Ssq libusb | grep '^mingw-w64-x86_64-libusb')
+          mkdir -p /opt/build /out/bin
+          export PKG_CONFIG_PATH=/opt/build/lib/pkgconfig:/mingw64/lib/pkgconfig
+          export CPPFLAGS="-I/opt/build/include"
+          export LDFLAGS="-L/opt/build/lib"
+          for repo in libplist libimobiledevice-glue libtatsu libusbmuxd libirecovery libimobiledevice; do
+            git clone --depth 1 https://github.com
+            cd $repo && ./autogen.sh --prefix=/opt/build --without-cython && make -j4 && make install && cd ..
+          done
+          ./autogen.sh --prefix=/opt/build
+          make -j4 && make install
+          cp /opt/build/bin/*.exe /opt/build/bin/*.dll /out/bin/
+          ldd /out/bin/idevicerestore.exe | grep '/mingw64/bin' | awk '{print $3}' | xargs -r cp -t /out/bin/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: idevicerestore-win64
+          path: /out/bin/
